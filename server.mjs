@@ -56,6 +56,102 @@ const ev = (port, code, timeout = 60000) => request(port, 'eval', { code }, time
 // JSON-escape a piece of text into a C# string literal.
 const cs = (text) => JSON.stringify(String(text ?? ''));
 
+// ---- output compaction (keeps the model-facing payload small) ----
+const tryParse = (text) => { try { return JSON.parse(text); } catch { return null; } };
+
+function countByName(list, max = 8) {
+  const map = new Map();
+  for (const raw of list || []) {
+    const s = String(raw);
+    const m = s.match(/^(.*?) x(\d+)(\[ship\])?$/);
+    let name = (m ? m[1] : s).replace(/\[ship\]$/, '');
+    // strip leading quantity words like "3个番茄" -> "番茄"
+    name = name.replace(/^\d+\s*[个颗块把份袋瓶卷张串堆盘碗杯根片枚套顶座口只条株支管桶箱包盒罐缸枝花朵束粒册]/, '').trim();
+    const num = m ? Number(m[2]) || 1 : 1;
+    map.set(name, (map.get(name) || 0) + num);
+  }
+  return [...map.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, max)
+    .map(([name, num]) => (num > 1 ? name + ' x' + num : name));
+}
+
+function compactInventory(obj, verbose) {
+  if (!obj || !Array.isArray(obj.items)) return obj;
+  const agg = new Map();
+  for (const it of obj.items) {
+    const key = (it.id || '') + '|' + (it.name || '');
+    const cur = agg.get(key) || { id: it.id, name: it.name, num: 0, stacks: 0 };
+    cur.num += Number(it.num) || 0;
+    cur.stacks += 1;
+    agg.set(key, cur);
+  }
+  const rows = [...agg.values()];
+  const out = { count: obj.count, matched: obj.matched, kinds: rows.length };
+  if (verbose) { out.items = rows; return out; }
+  out.items = rows.slice(0, 30);
+  if (rows.length > 30) out.omittedKinds = rows.length - 30;
+  return out;
+}
+
+function compactNearby(obj) {
+  if (!obj) return obj;
+  const chars = Array.isArray(obj.chars) ? obj.chars : [];
+  const things = Array.isArray(obj.things) ? obj.things : [];
+  const host = {};
+  for (const c of chars) { const k = c.hostility || '?'; host[k] = (host[k] || 0) + 1; }
+  const names = new Map();
+  for (const t of things) names.set(t.name, (names.get(t.name) || 0) + 1);
+  return {
+    radius: obj.radius,
+    charCount: chars.length,
+    charsByHostility: host,
+    chars: chars.slice(0, 10).map((c) => ({ name: c.name, dist: Math.round(c.dist), hp: c.hp })),
+    thingCount: things.length,
+    ground: [...names.entries()].slice(0, 10).map(([name, n]) => (n > 1 ? name + ' x' + n : name)),
+  };
+}
+
+function compactTown(obj) {
+  if (!obj) return obj;
+  const shops = (obj.shops || []).map((s) => ({
+    name: s.name,
+    id: s.id,
+    dist: Math.round(s.dist),
+    ration: s.ration,
+    goods: (s.goods || []).slice(0, 3).map((g) => g.name + ' @' + g.price),
+  }));
+  const res = obj.residents || [];
+  const interesting = res.filter((r) => r.merchant || r.quest).slice(0, 10)
+    .map((r) => ({ name: r.name, id: r.id, dist: Math.round(r.dist), quest: r.quest || undefined }));
+  return {
+    zone: obj.zone,
+    zoneName: obj.zoneName,
+    isTown: obj.isTown,
+    mapSize: obj.mapSize,
+    residentCount: obj.residentCount,
+    shopCount: obj.shopCount,
+    rationSellers: obj.rationSellers,
+    shops,
+    notableResidents: interesting,
+    otherResidents: Math.max(0, (obj.residentCount || 0) - interesting.length),
+  };
+}
+
+function compactCycle(obj) {
+  if (!obj) return obj;
+  const out = { ...obj };
+  for (const key of ['pickedGround', 'produce']) {
+    if (Array.isArray(out[key])) {
+      out[key + 'Count'] = out[key].length;
+      out[key + 'Top'] = countByName(out[key], 8);
+      delete out[key];
+    }
+  }
+  if (Array.isArray(out.plantErrors)) out.plantErrors = out.plantErrors.slice(0, 3);
+  return out;
+}
+
 const TOOLS = [
   {
     name: 'gm_status',
@@ -64,19 +160,26 @@ const TOOLS = [
   },
   {
     name: 'gm_inventory',
-    description: 'List what the player is carrying: item name, stack count and thing id. Pass name to filter (exact id/name first, then substring).',
+    description: 'List what the player is carrying (compact by default: stacked/aggregated, top 30 kinds). Pass name to filter (exact id/name first, then substring). verbose=true returns every stack.',
     inputSchema: {
       type: 'object',
       properties: {
         limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
         name: { type: 'string' },
+        verbose: { type: 'boolean', default: false },
       },
     },
   },
   {
     name: 'gm_nearby',
-    description: 'Characters and ground items within a radius of the player, sorted by distance.',
-    inputSchema: { type: 'object', properties: { radius: { type: 'integer', minimum: 1, maximum: 30, default: 8 } } },
+    description: 'Characters and ground items within radius (compact by default: top 10 chars, ground items grouped by name). verbose=true returns full arrays.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        radius: { type: 'integer', minimum: 1, maximum: 30, default: 8 },
+        verbose: { type: 'boolean', default: false },
+      },
+    },
   },
   {
     name: 'gm_talk',
@@ -272,10 +375,13 @@ const TOOLS = [
   },
   {
     name: 'gm_cycle',
-    description: 'Colony economic cycle. action=status reports farm/shipping state; action=run replants empty farm cells from carried seed stacks, grows crops, harvests mature plants (PopHarvest) and moves sellable produce into the registered shipping chest; action=settle advances time to the next 05:00 settlement and reports the cash gain.',
+    description: 'Colony economic cycle. action=status reports farm/shipping state; action=run replants empty farm cells from carried seed stacks, grows crops, harvests mature plants (PopHarvest) and moves sellable produce into the registered shipping chest (compact result: counts + top item groups; verbose=true returns every pickup); action=settle advances time to the next 05:00 and reports the cash gain.',
     inputSchema: {
       type: 'object',
-      properties: { action: { type: 'string', enum: ['status', 'run', 'settle'], default: 'run' } },
+      properties: {
+        action: { type: 'string', enum: ['status', 'run', 'settle'], default: 'run' },
+        verbose: { type: 'boolean', default: false },
+      },
     },
   },
   {
@@ -340,8 +446,11 @@ const TOOLS = [
   },
   {
     name: 'gm_town',
-    description: 'Town overview: current map name/size, residents grouped by role, which resident merchants sell what (incl. ration sellers), and where they are. Use it before shopping or building.',
-    inputSchema: { type: 'object', properties: {} },
+    description: 'Town overview (compact by default: every shop with top-3 goods, notable merchants/quest clients only). Use it before shopping or building. verbose=true returns the raw resident/shop dump.',
+    inputSchema: {
+      type: 'object',
+      properties: { verbose: { type: 'boolean', default: false } },
+    },
   },
   {
     name: 'gm_walk_map',
@@ -399,6 +508,7 @@ return JsonConvert.SerializeObject(o);`;
     case 'gm_inventory': {
       const limit = Math.max(1, Math.min(200, Number(args.limit) || 50));
       const filter = args.name ? cs(args.name) : 'null';
+      const verbose = !!args.verbose;
       const code = `
 var p = EClass.pc;
 string want = ${filter};
@@ -407,23 +517,34 @@ if (!string.IsNullOrEmpty(want)) {
   var exact = pool.Where(t => t.id == want || (t.Name ?? "") == want).ToList();
   pool = exact.Count > 0 ? exact : pool.Where(t => (t.Name ?? "").Contains(want) || t.id.Contains(want)).ToList();
 }
-var items = pool.Take(${limit}).Select(t => new Dictionary<string, object> { { "name", t.Name }, { "num", t.Num }, { "id", t.id } }).ToList();
+var items = pool.Take(Math.Max(${limit}, 200)).Select(t => new Dictionary<string, object> { { "name", t.Name }, { "num", t.Num }, { "id", t.id } }).ToList();
 return JsonConvert.SerializeObject(new Dictionary<string, object> { { "count", p.things.Count }, { "matched", pool.Count }, { "items", items } });`;
-      return { text: await withGame((port) => ev(port, code)) };
+      const raw = await withGame((port) => ev(port, code));
+      if (verbose) return { text: raw };
+      const parsed = tryParse(raw);
+      if (!parsed) return { text: raw };
+      const out = compactInventory(parsed, false);
+      out.items = (out.items || []).slice(0, limit);
+      return { text: JSON.stringify(out) };
     }
     case 'gm_nearby': {
       const r = Math.max(1, Math.min(30, Number(args.radius) || 8));
+      const verbose = !!args.verbose;
       const code = `
 var p = EClass.pc;
 var chars = EClass._map.charas.Where(c => c != null && c != p && c.pos.Distance(p.pos) <= ${r})
   .OrderBy(c => c.pos.Distance(p.pos))
-  .Select(c => new Dictionary<string, object> { { "name", c.Name }, { "x", c.pos.x }, { "z", c.pos.z }, { "dist", c.pos.Distance(p.pos) }, { "hp", c.hp } })
+  .Select(c => new Dictionary<string, object> { { "name", c.Name }, { "x", c.pos.x }, { "z", c.pos.z }, { "dist", c.pos.Distance(p.pos) }, { "hp", c.hp }, { "hostility", c.hostility.ToString() } })
   .Take(40).ToList();
 var things = EClass._map.things.Where(t => t != null && t.pos != null && t.pos.Distance(p.pos) <= ${r})
   .Select(t => new Dictionary<string, object> { { "name", t.Name }, { "num", t.Num }, { "x", t.pos.x }, { "z", t.pos.z } })
   .Take(40).ToList();
 return JsonConvert.SerializeObject(new Dictionary<string, object> { { "radius", ${r} }, { "chars", chars }, { "things", things } });`;
-      return { text: await withGame((port) => ev(port, code)) };
+      const raw = await withGame((port) => ev(port, code));
+      if (verbose) return { text: raw };
+      const parsed = tryParse(raw);
+      if (!parsed) return { text: raw };
+      return { text: JSON.stringify(compactNearby(parsed)) };
     }
     case 'gm_talk': {
       const text = String(args.text || '');
@@ -1271,7 +1392,11 @@ if (act == "run") {
 }
 try { EClass._map.RefreshAllTiles(); } catch (Exception ex) { }
 return JsonConvert.SerializeObject(result);`;
-      return { text: await withGame((port) => ev(port, code, 90000)) };
+      const raw = await withGame((port) => ev(port, code, 90000));
+      if (args.verbose || action !== 'run') return { text: raw };
+      const parsed = tryParse(raw);
+      if (!parsed) return { text: raw };
+      return { text: JSON.stringify(compactCycle(parsed)) };
     }
     case 'gm_npcs': {
       const r = Math.max(1, Math.min(30, Number(args.radius) || 10));
@@ -1610,7 +1735,11 @@ return JsonConvert.SerializeObject(new Dictionary<string, object> {
   { "shops", shops },
   { "residents", residents }
 });`;
-      return { text: await withGame((port) => ev(port, code, 30000)) };
+      const raw = await withGame((port) => ev(port, code, 30000));
+      if (args.verbose) return { text: raw };
+      const parsed = tryParse(raw);
+      if (!parsed) return { text: raw };
+      return { text: JSON.stringify(compactTown(parsed)) };
     }
     case 'gm_walk_map': {
       const action = ['go', 'enter', 'where'].includes(String(args.action)) ? String(args.action) : 'go';
@@ -1760,15 +1889,20 @@ if (layer != null && layer.drama != null) {
     }
   }
   var choices = new List<object>();
+  var seenChoices = new HashSet<string>();
   if (uiButtons.Count > 0) {
     for (int i = 0; i < uiButtons.Count; i++) {
       string raw = (uiButtons[i].mainText == null) ? "" : uiButtons[i].mainText.text;
-      choices.Add(new Dictionary<string, object> { { "index", i }, { "text", raw }, { "label", System.Text.RegularExpressions.Regex.Replace(raw ?? "", "<[^>]*>", "") } });
+      string clean = System.Text.RegularExpressions.Regex.Replace(raw ?? "", "<[^>]*>", "");
+      if (!seenChoices.Add(clean)) continue;
+      choices.Add(new Dictionary<string, object> { { "index", i }, { "text", raw }, { "label", clean } });
     }
   } else {
     for (int i = 0; i < dm._choices.Count; i++) {
       var c = dm._choices[i];
       if (c == null) continue;
+      string key = (c.text ?? "") + "|" + (c.idJump ?? "");
+      if (!seenChoices.Add(key)) continue;
       bool enabled = true;
       try { enabled = c.activeCondition == null || c.activeCondition(); } catch (Exception ex) { }
       choices.Add(new Dictionary<string, object> { { "index", i }, { "text", c.text }, { "enabled", enabled }, { "jump", c.idJump } });

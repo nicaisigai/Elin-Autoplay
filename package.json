@@ -1,6 +1,6 @@
 {
   "name": "elin-gm-mcp",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Gameplay-oriented MCP server for Elin (EA 23.355): high-level tools for observation, movement, dialogue, gathering, crafting, building, farming, shops and quests, plus a BepInEx fix plugin for blank-screen transitions.",
   "type": "module",
   "bin": {

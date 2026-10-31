@@ -1,5 +1,20 @@
 # elin-gm 变更记录
 
+## 0.7.0（2026-10-31，token 优化：默认精简输出）
+
+### 新增：重型工具默认精简输出（`verbose=true` 查看原始数据）
+- `gm_town`：每家店只给前 3 个商品；居民只保留商人/有委托的，其余只给数量。
+- `gm_cycle action=run`：`pickedGround` / `produce` 从完整物品列表改为
+  `pickedGroundCount + pickedGroundTop` / `produceCount + produceTop`（按物品名合并计数）；
+  `plantErrors` 最多保留 3 条。
+- `gm_inventory`：按 `id+name` 合并堆叠，默认只列 30 种（`kinds`/`omittedKinds` 提示总量）。
+- `gm_nearby`：只列最近 10 个人（名字/距离/HP）+ 按名字合并的地面物品；附怪物敌意分桶。
+- `gm_drama action=read`：选项按「文本+jump」去重，避免多层剧情叠加时重复输出。
+
+### 动机
+纯玩法实测中 token 大头是工具输出：`gm_town` 一次约 4–6k tokens、
+`gm_cycle run` 每轮约 2–3k tokens。精简后这两类输出降到数百 token 量级。
+
 ## 0.6.0（2026-10-31，空白画面根因修复 + 大地图行走）
 
 ### 新增：ElinGmFix 常驻插件
