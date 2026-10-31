@@ -1,0 +1,14 @@
+node_modules/
+npm-debug.log*
+*.log
+
+# plugin build leftovers
+fix/obj/
+fix/bin/
+*.pdb
+
+# editor/os noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

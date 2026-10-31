@@ -1,0 +1,14 @@
+-nologo
+-target:library
+-langversion:latest
+-out:ElinGmFix.dll
+-r:"G:\Steam\steamapps\common\Elin\Elin_Data\Managed\Elin.dll"
+-r:"G:\Steam\steamapps\common\Elin\Elin_Data\Managed\mscorlib.dll"
+-r:"G:\Steam\steamapps\common\Elin\Elin_Data\Managed\System.dll"
+-r:"G:\Steam\steamapps\common\Elin\Elin_Data\Managed\System.Core.dll"
+-r:"G:\Steam\steamapps\common\Elin\Elin_Data\Managed\UnityEngine.dll"
+-r:"G:\Steam\steamapps\common\Elin\Elin_Data\Managed\UnityEngine.CoreModule.dll"
+-r:"G:\Steam\steamapps\common\Elin\BepInEx\core\0Harmony.dll"
+-r:"G:\Steam\steamapps\common\Elin\BepInEx\core\BepInEx.Core.dll"
+-r:"G:\Steam\steamapps\common\Elin\BepInEx\core\BepInEx.Unity.dll"
+Plugin.cs

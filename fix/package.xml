@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Meta>
+  <title>Elin GM Fix</title>
+  <id>elin.gmfix</id>
+  <author>DSH</author>
+  <builtin>false</builtin>
+  <loadPriority>0</loadPriority>
+  <version>0.23.355</version>
+  <description>Suppresses exceptions thrown inside BaseGameScreen.RefreshWeather, which can abort scene initialization and leave a blank screen when entering a zone from the world map.</description>
+</Meta>
+

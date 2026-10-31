@@ -1,0 +1,35 @@
+{
+  "name": "elin-gm-mcp",
+  "version": "0.6.0",
+  "description": "Gameplay-oriented MCP server for Elin (EA 23.355): high-level tools for observation, movement, dialogue, gathering, crafting, building, farming, shops and quests, plus a BepInEx fix plugin for blank-screen transitions.",
+  "type": "module",
+  "bin": {
+    "elin-gm-mcp": "./server.mjs"
+  },
+  "main": "./server.mjs",
+  "files": [
+    "server.mjs",
+    "README.md",
+    "CHANGELOG.md",
+    "PLAYBOOK.md",
+    "fix/Plugin.cs",
+    "fix/csc.rsp",
+    "fix/package.xml"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs"
+  },
+  "keywords": [
+    "elin",
+    "mcp",
+    "model-context-protocol",
+    "autoplay",
+    "bepinex",
+    "harmony"
+  ],
+  "license": "UNLICENSED"
+}
